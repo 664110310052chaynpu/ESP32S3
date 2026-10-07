@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motor Fault Monitoring (6-Table Architecture)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 1200px; margin: auto; }
+        h2 { text-align: center; color: #2c3e50; }
+        
+        /* แผงควบคุม */
+        .control-panel { background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 20px; }
+        select, button { padding: 12px 20px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; outline: none; }
+        button { cursor: pointer; font-weight: bold; transition: 0.3s; color: white; border: none; }
+        .btn-start { background-color: #27ae60; }
+        .btn-stop { background-color: #e74c3c; }
+        
+        /* ปุ่มดาวน์โหลดแยกตาราง */
+        .export-panel { display: flex; gap: 15px; margin-top: 20px; justify-content: space-between; }
+        .export-panel button { flex: 1; padding: 15px; }
+        .btn-norm { background-color: #2980b9; } .btn-norm:hover { background-color: #3498db; }
+        .btn-overload { background-color: #d35400; } .btn-overload:hover { background-color: #e67e22; }
+        .btn-overheat { background-color: #c0392b; } .btn-overheat:hover { background-color: #e74c3c; }
+        
+        /* ตัวเลขดูสด */
+        .grid { display: flex; gap: 20px; justify-content: space-between; margin-bottom: 20px; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); flex: 1; text-align: center; border-top: 5px solid #bdc3c7; }
+        .value { font-size: 36px; font-weight: bold; color: #2c3e50; margin-top: 10px; }
+        
+        .chart-container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); height: 400px; margin-bottom: 20px; }
+        
+        /* ตารางประวัติ Log */
+        .log-container { display: flex; gap: 20px; margin-bottom: 30px; }
+        .log-box { background: white; padding: 20px; border-radius: 10px; flex: 1; height: 300px; overflow-y: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 4px solid #34495e; }
+        .log-box h3 { margin-top: 0; color: #2c3e50; text-align: center; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f9fa; position: sticky; top: 0; }
+        .txt-red { color: #e74c3c; font-weight: bold; }
+        .txt-green { color: #27ae60; font-weight: bold; }
+
+        /* Modal แจ้งเตือนฉุกเฉิน */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); }
+        .modal-content { background-color: #e74c3c; color: white; margin: 15% auto; padding: 30px; border-radius: 10px; width: 50%; text-align: center; font-size: 24px; font-weight: bold; box-shadow: 0 5px 15px rgba(0,0,0,0.3); animation: blink 1s infinite; }
+        @keyframes blink { 0% {opacity: 1;} 50% {opacity: 0.8;} 100% {opacity: 1;} }
+        .close-btn { background: white; color: #e74c3c; margin-top: 20px; padding: 10px 30px; border-radius: 5px; cursor: pointer; border: none; font-size: 18px; font-weight: bold;}
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Motor Fault Monitoring (6-Table Architecture)</h2>
+
+    <!-- แผงควบคุมการเก็บข้อมูล -->
+    <div class="control-panel">
+        <label style="font-weight: bold; font-size: 18px;">เลือกสถานะเป้าหมายเพื่อบันทึก:</label>
+        <select id="label-select">
+            <option value="normal">ลงตาราง dataset_normal</option>
+            <option value="overload">ลงตาราง dataset_overload</option>
+            <option value="overheat">ลงตาราง dataset_overheat</option>
+        </select>
+        <button id="record-btn" class="btn-start" onclick="toggleRecording()">▶ เริ่มบันทึกข้อมูล (Start)</button>
+        <span id="status-text" style="font-weight: bold; color: #7f8c8d; margin-left: 10px;">สถานะ: หยุดพัก</span>
+    </div>
+
+    <!-- ตัวเลขปัจจุบัน -->
+    <div class="grid">
+        <div class="card" style="border-top-color: #3498db;"><h3>Voltage (V_RMS)</h3><div class="value" id="val-v">--</div></div>
+        <div class="card" style="border-top-color: #e74c3c;"><h3>Current (I_RMS)</h3><div class="value" id="val-c">--</div></div>
+        <div class="card" style="border-top-color: #f1c40f;"><h3>Temperature (°C_Mean)</h3><div class="value" id="val-t">--</div></div>
+    </div>
+
+    <!-- กราฟเส้นแบบเรียลไทม์ -->
+    <div class="chart-container">
+        <canvas id="liveChart"></canvas>
+    </div>
+
+    <!-- ปุ่มดาวน์โหลด Dataset แบบแยกส่วน -->
+    <div class="export-panel">
+        <button class="btn-norm" onclick="exportDatasetCSV('dataset_normal')">📥 โหลด CSV (Normal)</button>
+        <button class="btn-overload" onclick="exportDatasetCSV('dataset_overload')">📥 โหลด CSV (Overload)</button>
+        <button class="btn-overheat" onclick="exportDatasetCSV('dataset_overheat')">📥 โหลด CSV (Overheat)</button>
+    </div>
+
+    <br>
+    
+    <!-- ส่วนแสดงประวัติเหตุการณ์และข้อผิดพลาด -->
+    <div class="log-container">
+        <!-- ตาราง Alert History -->
+        <div class="log-box" style="border-top-color: #f39c12;">
+            <h3>⚠️ ประวัติการเปลี่ยนสภาวะมอเตอร์ (Alert History)</h3>
+            <table>
+                <thead><tr><th>เวลา (Timestamp)</th><th>เหตุการณ์</th><th>เปลี่ยนจาก</th><th>เปลี่ยนเป็น</th></tr></thead>
+                <tbody id="alert-tbody"><tr><td colspan="4" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr></tbody>
+            </table>
+        </div>
+        
+        <!-- ตาราง Error Log -->
+        <div class="log-box" style="border-top-color: #e74c3c;">
+            <h3>🔧 ประวัติปัญหาฮาร์ดแวร์ (Error Log)</h3>
+            <table>
+                <thead><tr><th>เวลา (Timestamp)</th><th>ประเภท</th><th>รายละเอียด</th></tr></thead>
+                <tbody id="error-tbody"><tr><td colspan="3" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="alertModal" class="modal">
+    <div class="modal-content">
+        <p>⚠️ แจ้งเตือนฉุกเฉิน: ตรวจพบสภาวะมอเตอร์ผิดปกติ (<span id="alertType"></span>) ⚠️</p>
+        <button class="close-btn" onclick="closeAlert()">รับทราบ</button>
+    </div>
+</div>
+
+<script>
+    // --- ตั้งค่า URL ของ 6 ตาราง ---
+    const BASE_URL = 'https://yaldpalolktyhsbosgby.supabase.co/rest/v1';
+    const KEY = 'sb_publishable_-Rxp22xgVK1dCIXY7fWf6Q_kYPRuH38';
+    const HEADERS = { 'apikey': KEY, 'Authorization': `Bearer ${KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' };
+
+    let isRecording = false;
+    let isAlertActive = false;
+
+    // --- ตั้งค่ากราฟ ---
+    const ctx = document.getElementById('liveChart').getContext('2d');
+    const liveChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [
+            { label: 'Voltage RMS', borderColor: '#3498db', data: [], yAxisID: 'y' },
+            { label: 'Current RMS', borderColor: '#e74c3c', data: [], yAxisID: 'y1' },
+            { label: 'Temp Mean', borderColor: '#f1c40f', data: [], yAxisID: 'y1' }
+        ]},
+        options: { responsive: true, maintainAspectRatio: false, animation: false,
+            scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } }
+        }
+    });
+
+    function updateDisplayValue(elementId, value, decimals) {
+        const el = document.getElementById(elementId);
+        if (value === -999 || value === null || value === undefined) {
+            el.innerHTML = "<span style='font-size: 22px; color: #e74c3c;'>ไม่มีสัญญาณ</span>";
+        } else {
+            el.innerHTML = value.toFixed(decimals);
+        }
+    }
+
+    // ==========================================
+    // 1. ฟังก์ชันดึงข้อมูล Live สด (ดึงทุก 15 วิ)
+    // ==========================================
+    async function fetchLiveData() {
+        try {
+            const res = await fetch(`${BASE_URL}/live_monitor?id=eq.1`, { headers: HEADERS });
+            const data = await res.json();
+            
+            if(data && data.length > 0) {
+                const live = data[0];
+                
+                updateDisplayValue('val-v', live.voltage, 2);
+                updateDisplayValue('val-c', live.current, 3);
+                updateDisplayValue('val-t', live.temperature, 2);
+
+                updateButtonUI(live.is_recording, live.current_label);
+
+                if ((live.current_label === "overload" || live.current_label === "overheat") && live.is_recording && !isAlertActive) {
+                    triggerAlert(live.current_label);
+                }
+
+                const now = new Date();
+                const timeStr = now.getHours() + ':' + now.getMinutes() + ':' + now.getSeconds();
+                
+                liveChart.data.labels.push(timeStr);
+                liveChart.data.datasets[0].data.push(live.voltage === -999 ? null : live.voltage);
+                liveChart.data.datasets[1].data.push(live.current === -999 ? null : live.current);
+                liveChart.data.datasets[2].data.push(live.temperature === -999 ? null : live.temperature);
+
+                if(liveChart.data.labels.length > 20) {
+                    liveChart.data.labels.shift();
+                    liveChart.data.datasets.forEach(d => d.data.shift());
+                }
+                liveChart.update();
+            }
+        } catch (e) { console.log("เชื่อมต่อ Database ไม่ได้"); }
+    }
+
+    // ==========================================
+    // 2. ฟังก์ชันดึงประวัติ Alert & Error ลงตาราง
+    // ==========================================
+    async function fetchLogs() {
+        try {
+            // ดึง Alert History
+            const resAlert = await fetch(`${BASE_URL}/alert_history?select=*&order=id.desc&limit=15`, { headers: HEADERS });
+            const dataAlert = await resAlert.json();
+            let alertHTML = '';
+            if(dataAlert.length === 0) alertHTML = '<tr><td colspan="4" style="text-align:center;">ยังไม่มีประวัติการแจ้งเตือน</td></tr>';
+            dataAlert.forEach(row => {
+                let evtClass = row.event_type === "ALERT" ? "txt-red" : "txt-green";
+                alertHTML += `<tr><td>${row.timestamp}</td><td class="${evtClass}">${row.event_type}</td><td>${row.old_status}</td><td>${row.new_status}</td></tr>`;
+            });
+            document.getElementById('alert-tbody').innerHTML = alertHTML;
+
+            // ดึง Error Log
+            const resError = await fetch(`${BASE_URL}/error_log?select=*&order=id.desc&limit=15`, { headers: HEADERS });
+            const dataError = await resError.json();
+            let errorHTML = '';
+            if(dataError.length === 0) errorHTML = '<tr><td colspan="3" style="text-align:center;">ยังไม่มีประวัติปัญหาฮาร์ดแวร์</td></tr>';
+            dataError.forEach(row => {
+                errorHTML += `<tr><td>${row.timestamp}</td><td class="txt-red">${row.error_type}</td><td>${row.description}</td></tr>`;
+            });
+            document.getElementById('error-tbody').innerHTML = errorHTML;
+            
+        } catch (e) { console.log("โหลดประวัติ Log ไม่สำเร็จ"); }
+    }
+
+    // ==========================================
+    // 3. ฟังก์ชันแจ้งเตือน (AI Voice & Pop-up)
+    // ==========================================
+    function triggerAlert(type) {
+        isAlertActive = true;
+        document.getElementById('alertType').innerText = type.toUpperCase();
+        document.getElementById('alertModal').style.display = "block";
+        if ('speechSynthesis' in window) {
+            let msg = new SpeechSynthesisUtterance();
+            msg.lang = 'th-TH';
+            msg.text = type === "overload" ? "แจ้งเตือน มอเตอร์โหลดเกินพิกัด" : "แจ้งเตือน อุณหภูมิสูง";
+            window.speechSynthesis.speak(msg);
+        }
+    }
+
+    function closeAlert() {
+        document.getElementById('alertModal').style.display = "none";
+        isAlertActive = false;
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    }
+
+    // ==========================================
+    // 4. ฟังก์ชันควบคุมการบันทึก (สั่งบอร์ดผ่านตาราง Live)
+    // ==========================================
+    async function toggleRecording() {
+        const newState = !isRecording;
+        const selectedLabel = document.getElementById('label-select').value;
+        try {
+            await fetch(`${BASE_URL}/live_monitor?id=eq.1`, { method: 'PATCH', headers: HEADERS, body: JSON.stringify({ is_recording: newState, current_label: selectedLabel }) });
+        } catch (e) { alert("ส่งคำสั่งไม่สำเร็จ"); }
+    }
+
+    function updateButtonUI(state, label) {
+        isRecording = state;
+        const btn = document.getElementById('record-btn');
+        const statusText = document.getElementById('status-text');
+        const select = document.getElementById('label-select');
+
+        if (isRecording) {
+            btn.innerText = "⏹ กำลังบันทึกข้อมูล... (กดหยุด)"; btn.className = "btn-stop";
+            select.value = label; select.disabled = true;
+            statusText.innerHTML = `สถานะ: <span style='color:#e74c3c;'>🔴 กำลังอัดลงตาราง dataset_${label}</span>`;
+        } else {
+            btn.innerText = "▶ เริ่มบันทึกข้อมูล"; btn.className = "btn-start";
+            select.disabled = false;
+            statusText.innerHTML = "สถานะ: <span style='color:#7f8c8d;'>หยุดพัก</span>";
+        }
+    }
+
+    // ==========================================
+    // 5. ฟังก์ชันดาวน์โหลด CSV แบบแยกตาราง
+    // ==========================================
+    async function exportDatasetCSV(tableName) {
+        try {
+            const res = await fetch(`${BASE_URL}/${tableName}?select=timestamp,voltage,current,temperature&limit=50000`, { headers: HEADERS });
+            const data = await res.json();
+            if(data.length === 0) { alert(`ไม่มีข้อมูลในตาราง ${tableName}`); return; }
+
+            let csv = "Timestamp,Voltage_RMS,Current_RMS,Temperature_Mean,Label\n";
+            data.forEach(r => {
+                let v = r.voltage === -999 ? "" : r.voltage;
+                let c = r.current === -999 ? "" : r.current;
+                let t = r.temperature === -999 ? "" : r.temperature;
+                // แนบชื่อตารางไปเป็นคอลัมน์ Label ให้ด้วย เพื่อให้ AI รู้ว่ามาจากตารางไหน
+                let label = tableName.replace("dataset_", ""); 
+                csv += `${r.timestamp},${v},${c},${t},${label}\n`;
+            });
+            const link = document.createElement("a");
+            link.href = encodeURI("data:text/csv;charset=utf-8," + csv);
+            link.download = `${tableName}_mamba.csv`;
+            link.click();
+        } catch (e) { alert(`โหลดตาราง ${tableName} ล้มเหลว`); }
+    }
+
+    // เรียกฟังก์ชัน Live ทุก 15 วินาที
+    setInterval(fetchLiveData, 15000); 
+    fetchLiveData();
+
+    // เรียกฟังก์ชันอัปเดตประวัติตาราง Log ทุก 15 วินาที
+    setInterval(fetchLogs, 15000);
+    fetchLogs();
+</script>
+</body>
+</html>
